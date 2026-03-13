@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>Dreiecksgitter · 2 Ebenen · einstellbarer Abstand</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0a1a2f; color: white; font-family: sans-serif; }
+        #info {
+            position: absolute; top: 20px; left: 20px;
+            background: rgba(0,0,0,0.6); padding: 8px 16px; border-radius: 30px;
+            border: 1px solid #3f6a9c; z-index: 10;
+            pointer-events: none;
+        }
+        #controls {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 12px; background: rgba(0,0,0,0.7); padding: 20px 25px;
+            border-radius: 60px; border: 1px solid #3f6a9c; z-index: 20;
+            align-items: center; backdrop-filter: blur(5px);
+            flex-wrap: wrap; justify-content: center;
+        }
+        .slider-container {
+            display: flex; flex-direction: column; align-items: center; gap: 5px;
+            min-width: 120px;
+        }
+        .slider-container label {
+            color: #ffd966; font-weight: bold; font-size: 0.85rem;
+        }
+        .slider-container input {
+            width: 110px; height: 6px; border-radius: 10px;
+            background: #1e3a5f; outline: none; -webkit-appearance: none;
+        }
+        .slider-container input::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+            background: #ffaa00; cursor: pointer; border: 2px solid white;
+        }
+        .value-display {
+            color: #ffaa00; font-weight: bold; font-size: 0.9rem; min-width: 30px; text-align: center;
+        }
+        .button-container {
+            display: flex; gap: 8px; margin-left: 5px;
+        }
+        button {
+            background: #1e3a5f; border: none; color: white; font-size: 0.9rem;
+            padding: 6px 14px; border-radius: 30px; cursor: pointer;
+            border: 1px solid #4d7ab3; box-shadow: 0 3px 0 #0a1a2f;
+            transition: 0.1s ease; font-weight: bold;
+        }
+        button:hover { background: #2b4f7a; transform: translateY(-2px); }
+        button:active { transform: translateY(3px); }
+        #clickHint {
+            position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%);
+            color: #aaa; font-size: 0.9rem; background: rgba(0,0,0,0.5); padding: 4px 12px;
+            border-radius: 20px; z-index: 15;
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <div id="info">🔺 Dreiecksgitter · einstellbare Wassertiefe · freie Wellen</div>
+    <div id="clickHint">👆 Tippe auf die Wasseroberfläche für Impuls</div>
+    <div id="controls">
+        <div class="slider-container">
+            <label>💥 Intensität</label>
+            <input type="range" id="intensitySlider" min="0.5" max="8.0" step="0.1" value="3.0">
+            <span class="value-display" id="intensityValue">3.0</span>
+        </div>
+        <div class="slider-container">
+            <label>⚡ Basis-Geschw.</label>
+            <input type="range" id="speedSlider" min="0.5" max="3.0" step="0.1" value="1.5">
+            <span class="value-display" id="speedValue">1.5</span>
+        </div>
+        <div class="slider-container">
+            <label>🌊 Dämpfung</label>
+            <input type="range" id="dampingSlider" min="0.99" max="1.0" step="0.0005" value="0.9995">
+            <span class="value-display" id="dampingValue">0.9995</span>
+        </div>
+        <div class="slider-container">
+            <label>🏔️ Topo-Stärke</label>
+            <input type="range" id="topoStrengthSlider" min="0.5" max="3.0" step="0.1" value="1.5">
+            <span class="value-display" id="topoStrengthValue">1.5</span>
+        </div>
+        <div class="slider-container">
+            <label>🌊 Wasserbasis</label>
+            <input type="range" id="baseSlider" min="1.0" max="10.0" step="0.1" value="2.0">
+            <span class="value-display" id="baseValue">2.0</span>
+        </div>
+        <div class="button-container">
+            <button id="resetBtn">⟲ Reset</button>
+            <button id="terrainBtn">⛰️ Neue Topographie</button>
+        </div>
+    </div>
+
+    <script>
+        (function() {
+            // --- Szene, Kamera, Renderer ---
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0a1a2f);
+
+            const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 2000);
+            camera.position.set(300, 200, 400);
+            camera.lookAt(0, 0, 0);
+
+            const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            document.body.appendChild(renderer.domElement);
+
+            const controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.target.set(0, 2, 0);
+            controls.maxPolarAngle = Math.PI / 2;
+
+            // --- Licht ---
+            const ambientLight = new THREE.AmbientLight(0x404060);
+            scene.add(ambientLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+            dirLight.position.set(1, 2, 1);
+            scene.add(dirLight);
+            const backLight = new THREE.PointLight(0x446688, 0.5);
+            backLight.position.set(-2, 1, -2);
+            scene.add(backLight);
+
+            // --- Gitterparameter (200x200 für gute Performance) ---
+            const nX = 200;
+            const nZ = 200;
+            const spacing = 1.0;
+            const offsetX = (nX - 1) * spacing / 2;
+            const offsetZ = (nZ - 1) * spacing / 2;
+
+            // --- Höhenfelder ---
+            const bottomH = new Float32Array(nX * nZ);
+            let surfaceBase = 2.0; // Grundhöhe der Wasseroberfläche (einstellbar)
+            for (let i = 0; i < nX * nZ; i++) {
+                bottomH[i] = -2.0; // flacher Meeresboden
+            }
+
+            // --- Wellenzustand (Leapfrog) ---
+            const u_prev = new Float32Array(nX * nZ);
+            const u_cur  = new Float32Array(nX * nZ);
+            const u_next = new Float32Array(nX * nZ);
+
+            // --- Hilfsarray für Viskosität ---
+            const u_laplace = new Float32Array(nX * nZ);
+
+            // --- Parameter ---
+            let baseSpeed = 1.5;
+            let damping = 0.9995;
+            let topoStrength = 1.5;
+            const dt = 0.1;
+            const g = 9.81;
+            const viscosity = 0.001;
+            const maxAmplitude = 1000.0; // keine Begrenzung
+
+            // --- Regler ---
+            const intensitySlider = document.getElementById('intensitySlider');
+            const intensitySpan = document.getElementById('intensityValue');
+            let intensity = 3.0;
+            intensitySlider.addEventListener('input', (e) => {
+                intensity = parseFloat(e.target.value);
+                intensitySpan.textContent = intensity.toFixed(1);
+            });
+
+            const speedSlider = document.getElementById('speedSlider');
+            const speedSpan = document.getElementById('speedValue');
+            speedSlider.addEventListener('input', (e) => {
+                baseSpeed = parseFloat(e.target.value);
+                speedSpan.textContent = baseSpeed.toFixed(1);
+            });
+
+            const dampingSlider = document.getElementById('dampingSlider');
+            const dampingSpan = document.getElementById('dampingValue');
+            dampingSlider.addEventListener('input', (e) => {
+                damping = parseFloat(e.target.value);
+                dampingSpan.textContent = damping.toFixed(4);
+            });
+
+            const topoStrengthSlider = document.getElementById('topoStrengthSlider');
+            const topoStrengthSpan = document.getElementById('topoStrengthValue');
+            topoStrengthSlider.addEventListener('input', (e) => {
+                topoStrength = parseFloat(e.target.value);
+                topoStrengthSpan.textContent = topoStrength.toFixed(1);
+            });
+
+            const baseSlider = document.getElementById('baseSlider');
+            const baseSpan = document.getElementById('baseValue');
+            baseSlider.addEventListener('input', (e) => {
+                surfaceBase = parseFloat(e.target.value);
+                baseSpan.textContent = surfaceBase.toFixed(1);
+                // Keine weitere Änderung nötig, updateWaterGeometry verwendet den neuen Wert
+            });
+
+            // --- Hilfsfunktion: Dreiecksgitter erstellen (regelmäßige Dreiecke) ---
+            function createMeshGeometry(heightMap, yBase) {
+                // heightMap: Float32Array der Länge nX * nZ, gibt die Höhe an jedem Gitterpunkt an
+                // yBase: zusätzliche Grundhöhe (wird zu heightMap addiert)
+                const vertices = [];
+                const indices = [];
+                const colors = [];
+
+                // Vertices
+                for (let i = 0; i < nX; i++) {
+                    for (let k = 0; k < nZ; k++) {
+                        const x = i * spacing - offsetX;
+                        const z = k * spacing - offsetZ;
+                        const idx = i * nZ + k;
+                        const y = yBase + heightMap[idx];
+                        vertices.push(x, y, z);
+                    }
+                }
+
+                // Indices für Dreiecke (jedes Quadrat in zwei Dreiecke)
+                for (let i = 0; i < nX - 1; i++) {
+                    for (let k = 0; k < nZ - 1; k++) {
+                        const a = i * nZ + k;
+                        const b = i * nZ + (k + 1);
+                        const c = (i + 1) * nZ + k;
+                        const d = (i + 1) * nZ + (k + 1);
+
+                        indices.push(a, b, c);
+                        indices.push(b, d, c);
+                    }
+                }
+
+                // Farben (abhängig von Höhe)
+                const minY = -2.0;
+                const maxY = 8.0;
+                for (let i = 0; i < nX; i++) {
+                    for (let k = 0; k < nZ; k++) {
+                        const idx = i * nZ + k;
+                        const y = yBase + heightMap[idx];
+                        let t = (y - minY) / (maxY - minY);
+                        t = Math.max(0, Math.min(1, t));
+                        let r, g, b;
+                        if (yBase < 0) { // Boden
+                            r = 0.3 + t * 0.7;
+                            g = 0.2 + t * 0.5;
+                            b = 0.1 + t * 0.3;
+                        } else { // Wasser (wird später überschrieben)
+                            r = 0.2;
+                            g = 0.5;
+                            b = 1.0;
+                        }
+                        colors.push(r, g, b);
+                    }
+                }
+
+                const geometry = new THREE.BufferGeometry();
+                geometry.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                geometry.setIndex(indices);
+                geometry.computeVertexNormals();
+                return geometry;
+            }
+
+            // --- Initiale Geometrien erstellen ---
+            const bottomGeo = createMeshGeometry(bottomH, -2.0);
+            const waterGeo = createMeshGeometry(new Float32Array(nX * nZ), surfaceBase);
+
+            const bottomMat = new THREE.MeshStandardMaterial({ vertexColors: true, emissive: 0x111111, flatShading: false });
+            const waterMat = new THREE.MeshStandardMaterial({ vertexColors: true, emissive: 0x112233, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
+
+            const bottomMesh = new THREE.Mesh(bottomGeo, bottomMat);
+            const waterMesh = new THREE.Mesh(waterGeo, waterMat);
+            scene.add(bottomMesh);
+            scene.add(waterMesh);
+
+            // Drahtgitter
+            const wireframeMat = new THREE.LineBasicMaterial({ color: 0x88aaff, opacity: 0.3, transparent: true });
+            const waterWireframe = new THREE.LineSegments(new THREE.EdgesGeometry(waterGeo), wireframeMat);
+            waterMesh.add(waterWireframe);
+            const bottomWireframe = new THREE.LineSegments(new THREE.EdgesGeometry(bottomGeo), new THREE.LineBasicMaterial({ color: 0xaa8866, opacity: 0.2, transparent: true }));
+            bottomMesh.add(bottomWireframe);
+
+            // --- Hilfsfunktion: Mittelwert von u_cur abziehen (nur minimal, um langsame Drift zu verhindern) ---
+            function gentleDriftCorrection() {
+                let sum = 0;
+                for (let i = 0; i < nX * nZ; i++) {
+                    sum += u_cur[i];
+                }
+                const mean = sum / (nX * nZ);
+                if (Math.abs(mean) > 0.001) {
+                    for (let i = 0; i < nX * nZ; i++) {
+                        u_cur[i] -= mean * 0.01;
+                    }
+                }
+            }
+
+            // --- Interaktion: Pointerdown für Impuls ---
+            function onPointerDown(event) {
+                event.preventDefault();
+                const rect = renderer.domElement.getBoundingClientRect();
+                const clientX = event.clientX;
+                const clientY = event.clientY;
+
+                const ndcX = (clientX - rect.left) / rect.width * 2 - 1;
+                const ndcY = -(clientY - rect.top) / rect.height * 2 + 1;
+
+                const origin = new THREE.Vector3();
+                const direction = new THREE.Vector3();
+                origin.setFromMatrixPosition(camera.matrixWorld);
+
+                const vector = new THREE.Vector3(ndcX, ndcY, 0.5);
+                vector.unproject(camera);
+                direction.copy(vector).sub(origin).normalize();
+
+                const planeY = surfaceBase;
+                if (Math.abs(direction.y) < 1e-6) return;
+                const t = (planeY - origin.y) / direction.y;
+                if (t < 0) return;
+
+                const hitPoint = new THREE.Vector3().copy(origin).add(direction.multiplyScalar(t));
+                const x = hitPoint.x;
+                const z = hitPoint.z;
+
+                let i = Math.round((x + offsetX) / spacing);
+                let k = Math.round((z + offsetZ) / spacing);
+                i = Math.max(0, Math.min(nX - 1, i));
+                k = Math.max(0, Math.min(nZ - 1, k));
+
+                const radius = 20;
+                const strength = intensity;
+                const impulse = new Float32Array(nX * nZ);
+                for (let di = -radius; di <= radius; di++) {
+                    for (let dk = -radius; dk <= radius; dk++) {
+                        const ni = i + di;
+                        const nk = k + dk;
+                        if (ni >= 0 && ni < nX && nk >= 0 && nk < nZ) {
+                            const dist = Math.sqrt(di*di + dk*dk);
+                            if (dist <= radius) {
+                                const factor = Math.exp(-dist*dist / (radius*radius/4)) * strength;
+                                impulse[ni * nZ + nk] += factor;
+                            }
+                        }
+                    }
+                }
+                let sumImp = 0;
+                for (let idx = 0; idx < nX * nZ; idx++) {
+                    sumImp += impulse[idx];
+                }
+                const meanImp = sumImp / (nX * nZ);
+                for (let idx = 0; idx < nX * nZ; idx++) {
+                    u_cur[idx] += impulse[idx] - meanImp;
+                }
+            }
+
+            renderer.domElement.addEventListener('pointerdown', onPointerDown);
+
+            // --- Hilfsfunktion: Laplace für Viskosität (8 Nachbarn) ---
+            function computeLaplaceViscosity() {
+                for (let i = 0; i < nX; i++) {
+                    for (let k = 0; k < nZ; k++) {
+                        const idx = i * nZ + k;
+                        let sum = 0;
+                        let count = 0;
+                        for (let di = -1; di <= 1; di++) {
+                            for (let dk = -1; dk <= 1; dk++) {
+                                if (di === 0 && dk === 0) continue;
+                                const ni = i + di;
+                                const nk = k + dk;
+                                if (ni >= 0 && ni < nX && nk >= 0 && nk < nZ) {
+                                    sum += u_cur[ni * nZ + nk];
+                                    count++;
+                                }
+                            }
+                        }
+                        u_laplace[idx] = (sum - count * u_cur[idx]) / count;
+                    }
+                }
+            }
+
+            // --- Wellenschritt ---
+            function waveStep() {
+                computeLaplaceViscosity();
+
+                for (let i = 0; i < nX; i++) {
+                    for (let k = 0; k < nZ; k++) {
+                        const idx = i * nZ + k;
+
+                        // Tiefe unter Berücksichtigung der aktuellen surfaceBase
+                        let depth = surfaceBase + u_cur[idx] - bottomH[idx];
+                        if (depth < 0.1) depth = 0.1;
+
+                        const c_local = Math.max(0.2, baseSpeed * Math.sqrt(g * depth / 10));
+                        const c2dt2 = (c_local * dt) * (c_local * dt);
+
+                        const left   = (i > 0)       ? u_cur[(i-1)*nZ + k] : u_cur[idx];
+                        const right  = (i < nX-1)    ? u_cur[(i+1)*nZ + k] : u_cur[idx];
+                        const up     = (k > 0)       ? u_cur[i*nZ + (k-1)] : u_cur[idx];
+                        const down   = (k < nZ-1)    ? u_cur[i*nZ + (k+1)] : u_cur[idx];
+
+                        const laplace = left + right + up + down - 4 * u_cur[idx];
+                        const viscTerm = viscosity * u_laplace[idx] * dt;
+
+                        u_next[idx] = 2 * u_cur[idx] - u_prev[idx] + c2dt2 * laplace + viscTerm;
+                    }
+                }
+
+                for (let i = 0; i < nX * nZ; i++) {
+                    u_next[i] *= damping;
+                    u_prev[i] = u_cur[i];
+                    u_cur[i] = u_next[i];
+                }
+
+                // Keine Amplitudenbegrenzung, nur minimale Driftkorrektur
+                gentleDriftCorrection();
+            }
+
+            // --- Reset ---
+            function resetAll() {
+                for (let i = 0; i < nX * nZ; i++) {
+                    bottomH[i] = -2.0;
+                    u_prev[i] = 0;
+                    u_cur[i] = 0;
+                    u_next[i] = 0;
+                }
+                updateWaterGeometry();
+                updateBottomGeometry();
+            }
+
+            // --- Zufällige Topographie generieren ---
+            function generateRandomTerrain() {
+                const totalCells = nX * nZ;
+                const maxArea = 0.3 * totalCells;
+                const maxRadius = Math.sqrt(maxArea / Math.PI);
+
+                const i0 = Math.floor(Math.random() * nX);
+                const k0 = Math.floor(Math.random() * nZ);
+                const regionRadius = 20 + Math.random() * (maxRadius - 20);
+
+                const hillCount = 20 + Math.floor(Math.random() * 60);
+
+                for (let h = 0; h < hillCount; h++) {
+                    const iHill = Math.floor(Math.random() * nX);
+                    const kHill = Math.floor(Math.random() * nZ);
+                    const hillRadius = 10 + Math.random() * 30;
+                    const baseHeight = 2.0 + Math.random() * 6.0;
+                    const height = baseHeight * topoStrength;
+
+                    for (let di = -Math.floor(hillRadius); di <= Math.floor(hillRadius); di++) {
+                        for (let dk = -Math.floor(hillRadius); dk <= Math.floor(hillRadius); dk++) {
+                            const ni = iHill + di;
+                            const nk = kHill + dk;
+                            if (ni >= 0 && ni < nX && nk >= 0 && nk < nZ) {
+                                const distToRegion = Math.hypot(ni - i0, nk - k0);
+                                if (distToRegion <= regionRadius) {
+                                    const distToHill = Math.sqrt(di*di + dk*dk);
+                                    if (distToHill <= hillRadius) {
+                                        const factor = Math.exp(-distToHill*distToHill / (hillRadius*hillRadius/3)) * height;
+                                        bottomH[ni * nZ + nk] += factor;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                updateBottomGeometry();
+            }
+
+            // --- Geometrie aktualisieren ---
+            function updateWaterGeometry() {
+                const positions = waterGeo.attributes.position.array;
+                const colors = waterGeo.attributes.color.array;
+                const minH = -5.0;
+                const maxH = 5.0;
+                for (let i = 0; i < nX; i++) {
+                    for (let k = 0; k < nZ; k++) {
+                        const idx = i * nZ + k;
+                        const y = surfaceBase + u_cur[idx];
+                        positions[idx*3 + 1] = y;
+
+                        // Farbe nach Höhe
+                        let t = (u_cur[idx] - minH) / (maxH - minH);
+                        t = Math.max(0, Math.min(1, t));
+                        let r, g, b;
+                        if (t < 0.5) {
+                            r = 0.2 + t * 0.8;
+                            g = 0.5 + t;
+                            b = 1.0;
+                        } else {
+                            r = 0.6 + (t - 0.5) * 1.8;
+                            g = 1.0 - (t - 0.5) * 1.5;
+                            b = 1.0 - (t - 0.5) * 1.5;
+                        }
+                        colors[idx*3] = r;
+                        colors[idx*3+1] = g;
+                        colors[idx*3+2] = b;
+                    }
+                }
+                waterGeo.attributes.position.needsUpdate = true;
+                waterGeo.attributes.color.needsUpdate = true;
+                waterGeo.computeVertexNormals();
+            }
+
+            function updateBottomGeometry() {
+                const positions = bottomGeo.attributes.position.array;
+                const colors = bottomGeo.attributes.color.array;
+                const minY = -2.0;
+                const maxY = 8.0;
+                for (let i = 0; i < nX; i++) {
+                    for (let k = 0; k < nZ; k++) {
+                        const idx = i * nZ + k;
+                        const y = -2.0 + bottomH[idx];
+                        positions[idx*3 + 1] = y;
+
+                        let t = (bottomH[idx] + 2) / 10;
+                        t = Math.max(0, Math.min(1, t));
+                        const r = 0.3 + t * 0.7;
+                        const g = 0.2 + t * 0.5;
+                        const b = 0.1 + t * 0.3;
+                        colors[idx*3] = r;
+                        colors[idx*3+1] = g;
+                        colors[idx*3+2] = b;
+                    }
+                }
+                bottomGeo.attributes.position.needsUpdate = true;
+                bottomGeo.attributes.color.needsUpdate = true;
+                bottomGeo.computeVertexNormals();
+            }
+
+            // --- Buttons ---
+            document.getElementById('resetBtn').addEventListener('click', () => {
+                resetAll();
+            });
+
+            document.getElementById('terrainBtn').addEventListener('click', () => {
+                generateRandomTerrain();
+            });
+
+            // --- Animationsschleife ---
+            function animate() {
+                requestAnimationFrame(animate);
+
+                // Drei Wellenschritte pro Frame
+                waveStep();
+                waveStep();
+                waveStep();
+
+                updateWaterGeometry();
+
+                controls.update();
+                renderer.render(scene, camera);
+            }
+
+            animate();
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        })();
+    </script>
+</body>
+</html>
