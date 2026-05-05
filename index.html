@@ -2,6 +2,7 @@
 <html lang="de">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Dreiecksgitter 2 Ebenen - TORUS (periodisch)</title>
     <style>
         body { margin: 0; overflow: hidden; background-color: #0a1a2f; color: white; font-family: sans-serif; }
@@ -64,9 +65,9 @@
         this.enableDamping = false;
         this.dampingFactor = 0.05;
         this.enableZoom = true;
-        this.zoomSpeed = 1.0;
+        this.zoomSpeed = 0.3;
         this.enableRotate = true;
-        this.rotateSpeed = 1.0;
+        this.rotateSpeed = 0.3;
         this.enablePan = true;
         this.panSpeed = 1.0;
         this.minPolarAngle = 0;
@@ -214,7 +215,47 @@
         scope.domElement.addEventListener('contextmenu', onContextMenu);
         scope.domElement.addEventListener('pointerdown', onPointerDown);
         scope.domElement.addEventListener('wheel', onMouseWheel, { passive: false });
+                var touchStart = new THREE.Vector2();
+                var pinchStartDist = 0;
 
+function onTouchStart(e) {
+    if (e.touches.length === 1) {
+        state = STATE.ROTATE;
+        rotateStart.set(e.touches[0].clientX, e.touches[0].clientY);
+    } else if (e.touches.length === 2) {
+        state = STATE.ZOOM;
+        pinchStartDist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+        );
+    }
+}
+function onTouchMove(e) {
+    e.preventDefault();
+    if (e.touches.length === 1 && state === STATE.ROTATE) {
+        rotateEnd.set(e.touches[0].clientX, e.touches[0].clientY);
+        rotateDelta.subVectors(rotateEnd, rotateStart).multiplyScalar(scope.rotateSpeed);
+        var el = scope.domElement;
+        rotateLeft(2 * Math.PI * rotateDelta.x / el.clientHeight);
+        rotateUp(2 * Math.PI * rotateDelta.y / el.clientHeight);
+        rotateStart.copy(rotateEnd);
+        scope.update();
+    } else if (e.touches.length === 2 && state === STATE.ZOOM) {
+        var dist = Math.hypot(
+            e.touches[0].clientX - e.touches[1].clientX,
+            e.touches[0].clientY - e.touches[1].clientY
+        );
+        if (dist > pinchStartDist) dollyOut(getZoomScale());
+        else dollyIn(getZoomScale());
+        pinchStartDist = dist;
+        scope.update();
+    }
+}
+function onTouchEnd() { state = STATE.NONE; }
+
+scope.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
+scope.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
+scope.domElement.addEventListener('touchend', onTouchEnd);
         this.update();
     };
     </script>
